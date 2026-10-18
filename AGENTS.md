@@ -13,7 +13,7 @@ Recipe Hub API: FastAPI on Python 3.13. Its OpenAPI spec (`/openapi.json`) is th
 
 Shared rules, skills and personas come from `recipe-hub-ai` (version pinned in `ai.json`). Don't edit the generated block below or `.claude/skills` / `.claude/agents` by hand; change them in `recipe-hub-ai` and run `python3 ../recipe-hub-ai/sync.py .`.
 
-<!-- recipe-hub-ai:begin v0.1.0 -- generated, edit in recipe-hub-ai and run sync -->
+<!-- recipe-hub-ai:begin v0.2.0 -- generated, edit in recipe-hub-ai and run sync -->
 
 ## Recipe Hub — shared rules
 

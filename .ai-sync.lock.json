@@ -1,6 +1,6 @@
 {
   "source": "recipe-hub-ai",
-  "version": "v0.1.0",
+  "version": "v0.2.0",
   "include": [
     "shared",
     "api"
@@ -14,6 +14,8 @@
     ".claude/agents/test-author.md",
     ".claude/skills/add-endpoint/SKILL.md",
     ".claude/skills/commit/SKILL.md",
+    ".claude/skills/review-changes/SKILL.md",
+    ".claude/skills/test-first/SKILL.md",
     ".claude/skills/write-tests/SKILL.md"
   ]
 }
