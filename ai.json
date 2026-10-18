@@ -1,0 +1,5 @@
+{
+  "version": "v0.1.0",
+  "include": ["shared", "api"],
+  "targets": ["agents-md", "claude"]
+}

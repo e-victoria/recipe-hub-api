@@ -1,0 +1,19 @@
+{
+  "source": "recipe-hub-ai",
+  "version": "v0.1.0",
+  "include": [
+    "shared",
+    "api"
+  ],
+  "targets": [
+    "agents-md",
+    "claude"
+  ],
+  "files": [
+    ".claude/agents/reviewer.md",
+    ".claude/agents/test-author.md",
+    ".claude/skills/add-endpoint/SKILL.md",
+    ".claude/skills/commit/SKILL.md",
+    ".claude/skills/write-tests/SKILL.md"
+  ]
+}
