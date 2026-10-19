@@ -46,7 +46,7 @@ services:
       AWS_SECRET_ACCESS_KEY: recipe_hub_secret
       AWS_DEFAULT_REGION: us-east-1
     entrypoint: >
-      sh -c "aws --endpoint-url http://storage:9000 s3api head-bucket --bucket recipe-hub-images
+      sh -c "aws --endpoint-url http://storage:9000 s3api head-bucket --bucket recipe-hub-images 2>/dev/null
       || aws --endpoint-url http://storage:9000 s3api create-bucket --bucket recipe-hub-images"
     restart: "no"
 
