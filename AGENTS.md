@@ -5,9 +5,18 @@ Recipe Hub API: FastAPI on Python 3.13. Its OpenAPI spec (`/openapi.json`) is th
 ## Commands
 
 - Setup: `python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'`
-- Run: `.venv/bin/uvicorn app.main:app --reload --port 8000` (docs at http://localhost:8000/docs)
+- Local services: `docker compose up -d` (Postgres on 5432, RustFS (S3) on 9000, console on 9001), then `cp .env.example .env`
+- Migrate: `.venv/bin/alembic upgrade head`; new migration: `.venv/bin/alembic revision --autogenerate -m "..."` (review the generated file before committing)
+- Run: `.venv/bin/uvicorn app.main:app --reload --port 8000 --env-file .env` (docs at http://localhost:8000/docs)
 - Tests: `.venv/bin/pytest` (files in `tests/`)
 - Lint and format: `.venv/bin/ruff check . && .venv/bin/ruff format --check .`
+
+## Data
+
+- Postgres via SQLAlchemy 2 (`app/db.py`, `app/models.py`), migrations in `migrations/` (Alembic).
+- Recipe text lives in `recipe_translation`, one row per locale (`en`, `ru`, `pl`).
+- Image bytes live in S3 (RustFS locally, AWS S3 in production) via `app/storage.py`; the `image` table stores only the key and metadata.
+- Tests use in-memory SQLite and moto, so they need no running services.
 
 ## AI config
 

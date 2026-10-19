@@ -6,6 +6,11 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.146,<0.147",
     "uvicorn[standard]>=0.54,<0.55",
+    "sqlalchemy>=2.1,<2.2",
+    "alembic>=1.20,<1.21",
+    "psycopg[binary]>=3.3,<3.4",
+    "boto3>=1.43,<2",
+    "python-dotenv>=1.2,<2",
 ]
 
 [project.optional-dependencies]
@@ -13,6 +18,7 @@ dev = [
     "pytest>=9.1,<10",
     "httpx2>=2.14,<3",
     "ruff>=0.17,<0.18",
+    "moto[s3]>=5.2,<6",
 ]
 
 [build-system]

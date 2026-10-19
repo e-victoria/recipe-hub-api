@@ -1,0 +1,55 @@
+# Local development services. Production uses managed Postgres and AWS S3.
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: recipe_hub
+      POSTGRES_PASSWORD: recipe_hub
+      POSTGRES_DB: recipe_hub
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recipe_hub"]
+      interval: 2s
+      retries: 15
+
+  # S3-compatible object store for images.
+  storage:
+    image: rustfs/rustfs:1.0.3
+    environment:
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: recipe_hub
+      RUSTFS_SECRET_KEY: recipe_hub_secret
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      # A named volume, so /data keeps the image's non-root (10001) ownership.
+      - storage-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/health"]
+      interval: 2s
+      retries: 15
+
+  # Creates the image bucket once storage is healthy; safe to re-run.
+  storage-init:
+    image: amazon/aws-cli:2.38.2
+    depends_on:
+      storage:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: recipe_hub
+      AWS_SECRET_ACCESS_KEY: recipe_hub_secret
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: >
+      sh -c "aws --endpoint-url http://storage:9000 s3api head-bucket --bucket recipe-hub-images
+      || aws --endpoint-url http://storage:9000 s3api create-bucket --bucket recipe-hub-images"
+    restart: "no"
+
+volumes:
+  db-data:
+  storage-data:
