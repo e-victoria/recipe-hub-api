@@ -22,7 +22,7 @@ Recipe Hub API: FastAPI on Python 3.13. Its OpenAPI spec (`/openapi.json`) is th
 
 Shared rules, skills and personas come from `recipe-hub-ai` (version pinned in `ai.json`). Don't edit the generated block below or `.claude/skills` / `.claude/agents` by hand; change them in `recipe-hub-ai` and run `python3 ../recipe-hub-ai/sync.py .`.
 
-<!-- recipe-hub-ai:begin v0.2.0 -- generated, edit in recipe-hub-ai and run sync -->
+<!-- recipe-hub-ai:begin v0.3.0 -- generated, edit in recipe-hub-ai and run sync -->
 
 ## Recipe Hub — shared rules
 
@@ -31,6 +31,17 @@ Recipe Hub is a trilingual (EN/RU/PL) recipe web app, with a native Swift iOS ap
 - `recipe-hub` — Nuxt (Vue) web app: server-rendered, PWA.
 - `recipe-hub-api` — FastAPI backend. Its OpenAPI spec is the contract for every client.
 - `recipe-hub-ai` — shared skills, rules and personas for coding agents. This block was generated from it.
+
+### Product
+
+Recipe Hub is a personal hub of saved recipes, with nutrition data and family meal planning.
+
+- **Adding recipes**, three ways: fill in the "New recipe" form; paste a link or recipe text copied from elsewhere, which AI parses into the form; or ask the AI assistant to come up with a recipe.
+- **Managing recipes**: edit, delete, change portions, add comments. Edits are made by hand or with AI assistance.
+- **Nutrition**: every recipe has nutritional values (calories, fat, protein, vitamins, minerals, etc.). If a recipe lacks them, AI estimates them from the ingredient list.
+- **Labels**: built-in labels (e.g. "kids friendly", "thermomix") plus the user's own custom labels.
+- **Family members**: created and edited, each with preferences, calorie needs and health conditions.
+- **Meal planning**: a weekly menu in calendar and list views, with meals planned per family member.
 
 ### Working agreement
 
