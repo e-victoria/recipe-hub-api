@@ -21,6 +21,11 @@ class Settings:
     # Set for the local RustFS server; unset means AWS S3.
     # Credentials come from the standard AWS_* variables.
     s3_endpoint_url: str | None = field(default_factory=lambda: os.getenv("S3_ENDPOINT_URL"))
+    # Unset turns the AI assistant off: its endpoints answer 503.
+    anthropic_api_key: str | None = field(
+        default_factory=lambda: os.getenv("ANTHROPIC_API_KEY") or None
+    )
+    ai_model: str = field(default_factory=lambda: os.getenv("AI_MODEL", "claude-opus-5-5"))
 
 
 settings = Settings()

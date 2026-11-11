@@ -2,7 +2,7 @@ from collections.abc import Container, Iterable
 from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -98,6 +98,27 @@ def video_out(video: models.Video, storage: ImageStorage) -> schemas.RecipeVideo
     )
 
 
+def detail_out(
+    recipe: models.Recipe, text: models.RecipeTranslation, storage: ImageStorage
+) -> schemas.RecipeDetail:
+    return schemas.RecipeDetail(
+        id=recipe.id,
+        slug=recipe.slug,
+        locale=text.locale,
+        title=text.title,
+        description=text.description,
+        ingredients=text.ingredients,
+        steps=text.steps,
+        servings=recipe.servings,
+        prep_minutes=recipe.prep_minutes,
+        cook_minutes=recipe.cook_minutes,
+        created_at=recipe.created_at,
+        updated_at=recipe.updated_at,
+        images=[image_out(image, storage) for image in recipe.images],
+        videos=[video_out(video, storage) for video in recipe.videos],
+    )
+
+
 def uploaded_object(
     storage: ImageStorage,
     recipe: models.Recipe,
@@ -178,23 +199,29 @@ def get_recipe(
 ) -> schemas.RecipeDetail:
     """One recipe with its media, with text in `locale` where a translation exists."""
     recipe = find_recipe(session, user, slug)
-    text = pick_translation(recipe.translations, locale)
-    return schemas.RecipeDetail(
-        id=recipe.id,
-        slug=recipe.slug,
-        locale=text.locale,
-        title=text.title,
-        description=text.description,
-        ingredients=text.ingredients,
-        steps=text.steps,
-        servings=recipe.servings,
-        prep_minutes=recipe.prep_minutes,
-        cook_minutes=recipe.cook_minutes,
-        created_at=recipe.created_at,
-        updated_at=recipe.updated_at,
-        images=[image_out(image, storage) for image in recipe.images],
-        videos=[video_out(video, storage) for video in recipe.videos],
-    )
+    return detail_out(recipe, pick_translation(recipe.translations, locale), storage)
+
+
+@router.put(
+    "/{slug}/ingredients", response_model=schemas.RecipeDetail, status_code=status.HTTP_200_OK
+)
+def replace_ingredients(
+    slug: str,
+    body: schemas.IngredientsUpdate,
+    session: SessionDep,
+    storage: StorageDep,
+    user: CurrentUser,
+) -> schemas.RecipeDetail:
+    """Replace the ingredient list of the recipe's text in `locale`; other locales are untouched."""
+    recipe = find_recipe(session, user, slug)
+    text = next((t for t in recipe.translations if t.locale == body.locale), None)
+    if text is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="translation not found")
+    text.ingredients = list(body.ingredients)
+    # The list lives on the translation row, so mark the recipe itself as changed too.
+    recipe.updated_at = func.now()
+    session.commit()
+    return detail_out(recipe, text, storage)
 
 
 @router.post("", response_model=schemas.Recipe, status_code=status.HTTP_201_CREATED)

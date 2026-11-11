@@ -24,6 +24,14 @@ ImageContentType = Literal["image/jpeg", "image/png", "image/webp"]
 VideoContentType = Literal["video/mp4", "video/webm"]
 
 
+# Bounds on what one assistant request may carry, which also bounds what it costs.
+MAX_LIST_ITEMS = 200
+Line = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+AssistantRequestText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+]
+
+
 def _blank_to_none(value: object) -> object:
     return None if isinstance(value, str) and not value.strip() else value
 
@@ -59,6 +67,15 @@ class RecipeCreate(BaseModel):
             # A stable error type clients can map to a translated message.
             raise PydanticCustomError("duplicate_locale", "each locale may appear only once")
         return value
+
+
+class IngredientsUpdate(BaseModel):
+    """Replaces the ingredient list of the recipe's text in `locale`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    locale: Locale
+    ingredients: Annotated[list[Text], Field(max_length=MAX_LIST_ITEMS)]
 
 
 class RecipeTranslationOut(BaseModel):
@@ -173,6 +190,46 @@ class RecipeDetail(BaseModel):
     # In display order; the first image is the cover.
     images: list[RecipeImage]
     videos: list[RecipeVideo]
+
+
+# Assistant
+
+
+class IngredientAdviceRequest(BaseModel):
+    """An ingredient list as it stands in the editor, and what the user wants done to it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The language the recipe is written in; proposed ingredients come back in it.
+    locale: Locale
+    # The language of the app, for `reply` and each `reason`.
+    reply_locale: Locale
+    title: Title | None = None
+    servings: Annotated[int, Field(ge=1)] | None = None
+    ingredients: Annotated[list[Line], Field(max_length=MAX_LIST_ITEMS)]
+    steps: Annotated[list[Line], Field(max_length=MAX_LIST_ITEMS)] = []
+    request: AssistantRequestText
+
+
+class IngredientChange(BaseModel):
+    """One proposed edit. `index` is a 0-based position in the requested `ingredients`.
+
+    - `replace`: put `ingredient` at `index`.
+    - `remove`: drop the ingredient at `index`; `ingredient` is null.
+    - `add`: insert `ingredient` after `index`, or at the end when `index` is null.
+    """
+
+    action: Literal["replace", "add", "remove"]
+    index: int | None
+    ingredient: str | None
+    reason: str
+
+
+class IngredientAdvice(BaseModel):
+    """`reply` is a short answer for the user; `changes` may be empty."""
+
+    reply: str
+    changes: list[IngredientChange]
 
 
 # Accounts

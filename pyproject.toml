@@ -12,6 +12,7 @@ dependencies = [
     "boto3>=1.43,<2",
     "python-dotenv>=1.2,<2",
     "pwdlib[argon2]>=0.3,<0.4",
+    "anthropic>=2.8,<3",
 ]
 
 [project.optional-dependencies]

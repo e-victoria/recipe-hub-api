@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any, get_args
 
@@ -600,6 +600,7 @@ ROUTES = [
     ("post", "/recipes/dumplings/images", {"storage_key": "k"}),
     ("post", "/recipes/dumplings/videos/uploads", {"content_type": "video/mp4", "size_bytes": 1}),
     ("post", "/recipes/dumplings/videos", {"storage_key": "k"}),
+    ("put", "/recipes/dumplings/ingredients", {"locale": "en", "ingredients": []}),
 ]
 
 
@@ -611,11 +612,6 @@ def test_recipe_routes_require_sign_in(
     response = anon.request(method, path, json=body)
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
-
-
-@pytest.fixture
-def stranger(register: Callable[..., dict], signed_in: Callable[[str], TestClient]) -> TestClient:
-    return signed_in(register("olek@example.com")["token"])
 
 
 def test_users_see_only_their_own_recipes(client: TestClient, stranger: TestClient) -> None:
@@ -647,3 +643,79 @@ def test_openapi_marks_recipe_routes_as_secured(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
     assert paths["/recipes"]["get"]["security"]
     assert paths["/recipes/{slug}/images"]["post"]["security"]
+
+
+def test_replace_ingredients_in_one_locale(client: TestClient) -> None:
+    client.post("/recipes", json=recipe_body())
+
+    response = client.put(
+        "/recipes/dumplings/ingredients",
+        json={"locale": "en", "ingredients": [" 500 g flour ", "2 tbsp ground flaxseed"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["locale"] == "en"
+    assert response.json()["ingredients"] == ["500 g flour", "2 tbsp ground flaxseed"]
+    saved = client.get("/recipes/dumplings").json()
+    assert saved["ingredients"] == ["500 g flour", "2 tbsp ground flaxseed"]
+    assert saved["steps"] == ["Mix", "Boil"]
+    assert client.get("/recipes/dumplings", params={"locale": "pl"}).json()["ingredients"] == []
+
+
+def test_replace_ingredients_can_empty_the_list(client: TestClient) -> None:
+    client.post("/recipes", json=recipe_body())
+
+    response = client.put(
+        "/recipes/dumplings/ingredients", json={"locale": "en", "ingredients": []}
+    )
+
+    assert response.status_code == 200
+    assert client.get("/recipes/dumplings").json()["ingredients"] == []
+
+
+def test_replace_ingredients_needs_an_existing_translation(client: TestClient) -> None:
+    client.post("/recipes", json=recipe_body())
+
+    response = client.put(
+        "/recipes/dumplings/ingredients", json={"locale": "ru", "ingredients": ["мука"]}
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"ingredients": ["flour"]},
+        {"locale": "en"},
+        {"locale": "en", "ingredients": ["  "]},
+        {"locale": "en", "ingredients": ["flour"], "steps": ["Mix"]},
+    ],
+    ids=["no-locale", "no-ingredients", "blank-ingredient", "unknown-field"],
+)
+def test_replace_ingredients_rejects_invalid_input(
+    client: TestClient, body: dict[str, Any]
+) -> None:
+    client.post("/recipes", json=recipe_body())
+
+    assert client.put("/recipes/dumplings/ingredients", json=body).status_code == 422
+
+
+def test_replace_ingredients_is_private(
+    client: TestClient, stranger: TestClient, anon: TestClient
+) -> None:
+    client.post("/recipes", json=recipe_body())
+    body = {"locale": "en", "ingredients": ["sand"]}
+
+    assert anon.put("/recipes/dumplings/ingredients", json=body).status_code == 401
+    assert stranger.put("/recipes/dumplings/ingredients", json=body).status_code == 404
+    assert client.get("/recipes/dumplings").json()["ingredients"] == ["500 g flour", "2 eggs"]
+
+
+def test_openapi_describes_replace_ingredients(client: TestClient) -> None:
+    route = client.get("/openapi.json").json()["paths"]["/recipes/{slug}/ingredients"]["put"]
+
+    assert route["security"]
+    assert route["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/RecipeDetail"
+    )

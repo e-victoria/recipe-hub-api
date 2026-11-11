@@ -27,6 +27,12 @@ Recipe Hub API: FastAPI on Python 3.13. Its OpenAPI spec (`/openapi.json`) is th
 - Login and registration rate limits live in process memory (`app/ratelimit.py`): fine for one worker, but move them to a shared store before scaling out. Behind a proxy, run uvicorn with `--proxy-headers` so limits see the client address.
 - Upgrading a database that already has recipes: run `alembic upgrade 411be2343bc7`, start the API and register, then `alembic upgrade head` gives existing recipes to the earliest user.
 
+## AI assistant
+
+- `app/assistant.py` holds every call to the AI provider (Anthropic, `ANTHROPIC_API_KEY`; model in `AI_MODEL`), along with its system prompt. Without a key the assistant endpoints answer 503.
+- Assistant endpoints only propose: they save nothing, and the client applies what the user accepts. They are rate limited per user (`RateLimits.assistant`).
+- Tests replace `get_assistant` with a fake, so they never call the provider.
+
 ## AI config
 
 Shared rules, skills and personas come from `recipe-hub-ai` (version pinned in `ai.json`). Don't edit the generated block below or `.claude/skills` / `.claude/agents` by hand; change them in `recipe-hub-ai` and run `python3 ../recipe-hub-ai/sync.py .`.

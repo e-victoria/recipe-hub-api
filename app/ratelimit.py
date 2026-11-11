@@ -53,6 +53,8 @@ class RateLimits:
     login: RateLimiter = field(default_factory=lambda: RateLimiter(5, 15 * 60))
     # Registrations per client address: slows mass sign-ups.
     register: RateLimiter = field(default_factory=lambda: RateLimiter(10, 60 * 60))
+    # Assistant requests per user: each one is a paid call to the AI provider.
+    assistant: RateLimiter = field(default_factory=lambda: RateLimiter(30, 60 * 60))
 
 
 @functools.cache

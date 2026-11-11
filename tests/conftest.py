@@ -76,3 +76,9 @@ def user_id(user: dict) -> uuid.UUID:
 def client(user: dict, signed_in: SignedIn) -> TestClient:
     """A client signed in as `user`."""
     return signed_in(user["token"])
+
+
+@pytest.fixture
+def stranger(register: Register, signed_in: SignedIn) -> TestClient:
+    """A client signed in as a second user."""
+    return signed_in(register("olek@example.com")["token"])
