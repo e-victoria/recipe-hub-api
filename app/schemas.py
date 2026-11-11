@@ -86,6 +86,16 @@ class Recipe(BaseModel):
     translations: list[RecipeTranslationOut]
 
 
+class RecipeImage(BaseModel):
+    """`url` is presigned and expires; fetch the recipe again for a fresh one."""
+
+    id: uuid.UUID
+    url: str
+    content_type: str
+    width: int | None
+    height: int | None
+
+
 class RecipeSummary(BaseModel):
     """A recipe for lists, in one locale. `locale` says which one the text is in."""
 
@@ -98,16 +108,8 @@ class RecipeSummary(BaseModel):
     prep_minutes: int | None
     cook_minutes: int | None
     created_at: datetime
-
-
-class RecipeImage(BaseModel):
-    """`url` is presigned and expires; fetch the recipe again for a fresh one."""
-
-    id: uuid.UUID
-    url: str
-    content_type: str
-    width: int | None
-    height: int | None
+    # The first image, or null when the recipe has none.
+    cover: RecipeImage | None
 
 
 class RecipeVideo(BaseModel):

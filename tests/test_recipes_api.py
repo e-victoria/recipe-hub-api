@@ -200,8 +200,37 @@ def test_list_recipes_in_requested_locale(client: TestClient) -> None:
             "prep_minutes": 20,
             "cook_minutes": 40,
             "created_at": items[0]["created_at"],
+            "cover": None,
         }
     ]
+
+
+def test_list_recipes_has_the_first_image_as_cover(
+    client: TestClient, db: sessionmaker[Session]
+) -> None:
+    client.post("/recipes", json=recipe_body())
+    with db() as session, session.begin():
+        recipe = session.scalars(select(Recipe)).one()
+        recipe.images = [
+            Image(position=1, storage_key="r/2.png", content_type="image/png"),
+            Image(
+                position=0,
+                storage_key="r/1.jpg",
+                content_type="image/jpeg",
+                width=800,
+                height=600,
+            ),
+        ]
+
+    cover = client.get("/recipes").json()[0]["cover"]
+
+    assert cover == {
+        "id": cover["id"],
+        "url": "https://media.test/r/1.jpg",
+        "content_type": "image/jpeg",
+        "width": 800,
+        "height": 600,
+    }
 
 
 def test_list_recipes_falls_back_to_english_then_any(client: TestClient) -> None:

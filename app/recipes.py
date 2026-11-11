@@ -132,6 +132,7 @@ def commit_media(session: Session) -> None:
 @router.get("", response_model=list[schemas.RecipeSummary], status_code=status.HTTP_200_OK)
 def list_recipes(
     session: SessionDep,
+    storage: StorageDep,
     user: CurrentUser,
     locale: models.Locale = models.Locale.en,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -140,7 +141,7 @@ def list_recipes(
     """Recipes, newest first, with text in `locale` where a translation exists."""
     recipes = session.scalars(
         select(models.Recipe)
-        .options(selectinload(models.Recipe.translations))
+        .options(selectinload(models.Recipe.translations), selectinload(models.Recipe.images))
         # A recipe with no text can't be listed; skip it in SQL so paging stays exact.
         .where(models.Recipe.owner_id == user.id, models.Recipe.translations.any())
         .order_by(models.Recipe.created_at.desc(), models.Recipe.id)
@@ -161,6 +162,7 @@ def list_recipes(
                 prep_minutes=recipe.prep_minutes,
                 cook_minutes=recipe.cook_minutes,
                 created_at=recipe.created_at,
+                cover=image_out(recipe.images[0], storage) if recipe.images else None,
             )
         )
     return summaries
