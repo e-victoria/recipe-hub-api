@@ -31,7 +31,7 @@ Recipe Hub API: FastAPI on Python 3.13. Its OpenAPI spec (`/openapi.json`) is th
 
 Shared rules, skills and personas come from `recipe-hub-ai` (version pinned in `ai.json`). Don't edit the generated block below or `.claude/skills` / `.claude/agents` by hand; change them in `recipe-hub-ai` and run `python3 ../recipe-hub-ai/sync.py .`.
 
-<!-- recipe-hub-ai:begin v0.3.0 -- generated, edit in recipe-hub-ai and run sync -->
+<!-- recipe-hub-ai:begin v0.4.0 -- generated, edit in recipe-hub-ai and run sync -->
 
 ## Recipe Hub — shared rules
 
@@ -45,6 +45,7 @@ Recipe Hub is a trilingual (EN/RU/PL) recipe web app, with a native Swift iOS ap
 
 Recipe Hub is a personal hub of saved recipes, with nutrition data and family meal planning.
 
+- **Accounts**: each account belongs to one person, who logs in with email and password. Family members are profiles inside the account, not logins. Users only ever see their own data.
 - **Adding recipes**, three ways: fill in the "New recipe" form; paste a link or recipe text copied from elsewhere, which AI parses into the form; or ask the AI assistant to come up with a recipe.
 - **Managing recipes**: edit, delete, change portions, add comments. Edits are made by hand or with AI assistance.
 - **Nutrition**: every recipe has nutritional values (calories, fat, protein, vitamins, minerals, etc.). If a recipe lacks them, AI estimates them from the ingredient list.
@@ -72,5 +73,8 @@ Conventional Commits, title only: `type(scope): summary`. No body, no trailers, 
 - Group endpoints with `tags`. Use explicit status codes.
 - Configuration comes from environment variables via `app/settings.py`. No secrets in code.
 - The API never proxies a raw third-party response; normalize it into our own models first.
+- Every endpoint that reads or writes user data takes `user: CurrentUser` from `app/auth.py` and filters every query by owner. Another user's data is a 404, never a 403, so clients can't probe for it. An endpoint that is public on purpose says so in its docstring.
+- New user-owned tables get an `owner_id` foreign key to `user.id` with `ON DELETE CASCADE`.
+- Never log or return passwords, password hashes or session tokens, except the token in the login and register responses.
 
 <!-- recipe-hub-ai:end -->
