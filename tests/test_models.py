@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 import app.settings
 from app.db import Base
-from app.models import Image, Locale, Recipe, RecipeTranslation, Video
+from app.models import Image, Locale, Recipe, RecipeTranslation, User, UserSession, Video
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -40,8 +40,13 @@ def session() -> Iterator[Session]:
         yield session
 
 
-def make_recipe() -> Recipe:
+def make_user(email: str = "anna@example.com") -> User:
+    return User(email=email, password_hash="$argon2id$hash")
+
+
+def make_recipe(owner: User | None = None) -> Recipe:
     return Recipe(
+        owner=owner or make_user(),
         slug="pierogi",
         servings=4,
         translations=[
@@ -141,6 +146,36 @@ def test_database_cascades_without_the_orm(session: Session) -> None:
     assert session.scalars(select(Video)).all() == []
 
 
+def test_email_is_unique(session: Session) -> None:
+    session.add_all([make_user(), make_user()])
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_slug_is_unique_per_owner(session: Session) -> None:
+    anna, olek = make_user(), make_user("olek@example.com")
+    session.add_all([Recipe(owner=anna, slug="soup"), Recipe(owner=olek, slug="soup")])
+    session.commit()
+
+    session.add(Recipe(owner=anna, slug="soup"))
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_deleting_user_deletes_their_recipes_and_sessions(session: Session) -> None:
+    user = make_user()
+    session.add_all(
+        [make_recipe(user), UserSession(user=user, token_hash="h", expires_at=datetime(2030, 1, 1))]
+    )
+    session.commit()
+
+    session.execute(delete(User))
+    session.commit()
+
+    assert session.scalars(select(Recipe)).all() == []
+    assert session.scalars(select(UserSession)).all() == []
+
+
 @pytest.fixture
 def use_database_url(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], Config]:
     def use(url: str) -> Config:
@@ -176,3 +211,39 @@ def test_migrations_accept_percent_in_url(
     # URL-encoded passwords contain %, which ConfigParser would treat as interpolation.
     command.upgrade(use_database_url(f"sqlite:///{tmp_path / 'p%40ss.db'}"), "head")
     assert any(tmp_path.iterdir())
+
+
+def test_migration_gives_ownerless_recipes_to_the_first_user(
+    tmp_path: Path, use_database_url: Callable[[str], Config]
+) -> None:
+    url = f"sqlite:///{tmp_path / 'test.db'}"
+    config = use_database_url(url)
+    command.upgrade(config, "3f1caa5b2879")  # Before accounts.
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("INSERT INTO recipe (id, slug) VALUES ('a1', 'soup')")
+    command.upgrade(config, "411be2343bc7")
+    with engine.begin() as conn:
+        for uid, email, created in [("u2", "late", "2026-02-01"), ("u1", "first", "2026-01-01")]:
+            conn.exec_driver_sql(
+                "INSERT INTO user (id, email, password_hash, created_at) "
+                f"VALUES ('{uid}', '{email}', 'h', '{created}')"
+            )
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT owner_id FROM recipe").scalar() == "u1"
+
+
+def test_migration_stops_when_recipes_have_no_one_to_belong_to(
+    tmp_path: Path, use_database_url: Callable[[str], Config]
+) -> None:
+    url = f"sqlite:///{tmp_path / 'test.db'}"
+    config = use_database_url(url)
+    command.upgrade(config, "3f1caa5b2879")
+    with create_engine(url).begin() as conn:
+        conn.exec_driver_sql("INSERT INTO recipe (id, slug) VALUES ('a1', 'soup')")
+
+    with pytest.raises(RuntimeError, match="register your account"):
+        command.upgrade(config, "head")
