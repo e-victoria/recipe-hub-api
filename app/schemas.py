@@ -24,6 +24,14 @@ ImageContentType = Literal["image/jpeg", "image/png", "image/webp"]
 VideoContentType = Literal["video/mp4", "video/webm"]
 
 
+# Bounds on what one assistant request may carry, which also bounds what it costs.
+MAX_LIST_ITEMS = 200
+Line = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+AssistantRequestText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+]
+
+
 def _blank_to_none(value: object) -> object:
     return None if isinstance(value, str) and not value.strip() else value
 
@@ -61,6 +69,15 @@ class RecipeCreate(BaseModel):
         return value
 
 
+class IngredientsUpdate(BaseModel):
+    """Replaces the ingredient list of the recipe's text in `locale`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    locale: Locale
+    ingredients: Annotated[list[Text], Field(max_length=MAX_LIST_ITEMS)]
+
+
 class RecipeTranslationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -86,6 +103,16 @@ class Recipe(BaseModel):
     translations: list[RecipeTranslationOut]
 
 
+class RecipeImage(BaseModel):
+    """`url` is presigned and expires; fetch the recipe again for a fresh one."""
+
+    id: uuid.UUID
+    url: str
+    content_type: str
+    width: int | None
+    height: int | None
+
+
 class RecipeSummary(BaseModel):
     """A recipe for lists, in one locale. `locale` says which one the text is in."""
 
@@ -98,16 +125,8 @@ class RecipeSummary(BaseModel):
     prep_minutes: int | None
     cook_minutes: int | None
     created_at: datetime
-
-
-class RecipeImage(BaseModel):
-    """`url` is presigned and expires; fetch the recipe again for a fresh one."""
-
-    id: uuid.UUID
-    url: str
-    content_type: str
-    width: int | None
-    height: int | None
+    # The first image, or null when the recipe has none.
+    cover: RecipeImage | None
 
 
 class RecipeVideo(BaseModel):
@@ -171,3 +190,87 @@ class RecipeDetail(BaseModel):
     # In display order; the first image is the cover.
     images: list[RecipeImage]
     videos: list[RecipeVideo]
+
+
+# Assistant
+
+
+class IngredientAdviceRequest(BaseModel):
+    """An ingredient list as it stands in the editor, and what the user wants done to it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The language the recipe is written in; proposed ingredients come back in it.
+    locale: Locale
+    # The language of the app, for `reply` and each `reason`.
+    reply_locale: Locale
+    title: Title | None = None
+    servings: Annotated[int, Field(ge=1)] | None = None
+    ingredients: Annotated[list[Line], Field(max_length=MAX_LIST_ITEMS)]
+    steps: Annotated[list[Line], Field(max_length=MAX_LIST_ITEMS)] = []
+    request: AssistantRequestText
+
+
+class IngredientChange(BaseModel):
+    """One proposed edit. `index` is a 0-based position in the requested `ingredients`.
+
+    - `replace`: put `ingredient` at `index`.
+    - `remove`: drop the ingredient at `index`; `ingredient` is null.
+    - `add`: insert `ingredient` after `index`, or at the end when `index` is null.
+    """
+
+    action: Literal["replace", "add", "remove"]
+    index: int | None
+    ingredient: str | None
+    reason: str
+
+
+class IngredientAdvice(BaseModel):
+    """`reply` is a short answer for the user; `changes` may be empty."""
+
+    reply: str
+    changes: list[IngredientChange]
+
+
+# Accounts
+
+# Deliberately loose: the only real check is sending mail to it, which comes with verification.
+Email = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, to_lower=True, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+    ),
+]
+# Not stripped: spaces are part of a password. The cap keeps hashing cheap to refuse.
+NewPassword = Annotated[str, StringConstraints(min_length=8, max_length=128)]
+Password = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: Email
+    password: NewPassword
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: Email
+    password: Password
+
+
+class User(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    created_at: datetime
+
+
+class AuthSession(BaseModel):
+    """Send `token` as `Authorization: Bearer <token>` until `expires_at`."""
+
+    token: str
+    expires_at: datetime
+    user: User

@@ -1,17 +1,16 @@
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any, get_args
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app import recipes, schemas
-from app.db import Base, get_session
 from app.main import app
-from app.models import Image, Recipe, Video
+from app.models import Image, Recipe, User, Video
 from app.storage import (
     IMAGE_CONTENT_TYPES,
     MAX_IMAGE_BYTES,
@@ -40,30 +39,16 @@ class FakeStorage:
 
 
 @pytest.fixture
-def db() -> sessionmaker[Session]:
-    # One shared in-memory database, reachable from TestClient's worker thread.
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False)
+def storage(anon: TestClient) -> Iterator[FakeStorage]:
+    # Depends on `anon`, which clears all overrides on teardown.
+    fake = FakeStorage()
+    app.dependency_overrides[get_storage] = lambda: fake
+    yield fake
 
 
-@pytest.fixture
-def storage() -> FakeStorage:
-    return FakeStorage()
-
-
-@pytest.fixture
-def client(db: sessionmaker[Session], storage: FakeStorage) -> Iterator[TestClient]:
-    def override() -> Iterator[Session]:
-        with db() as session:
-            yield session
-
-    app.dependency_overrides[get_session] = override
-    app.dependency_overrides[get_storage] = lambda: storage
-    yield TestClient(app)
-    app.dependency_overrides.clear()
+@pytest.fixture(autouse=True)
+def _fake_storage(storage: FakeStorage) -> None:
+    pass
 
 
 def recipe_body(**overrides: Any) -> dict[str, Any]:
@@ -141,10 +126,10 @@ def test_create_recipe_retries_when_slug_is_taken_concurrently(
     real = recipes.unique_slug
     calls: list[str] = []
 
-    def stale_first(session: Session, title: str) -> str:
+    def stale_first(session: Session, owner: User, title: str) -> str:
         # The first answer is what a request that lost the race would have seen.
         calls.append(title)
-        return "dumplings" if len(calls) == 1 else real(session, title)
+        return "dumplings" if len(calls) == 1 else real(session, owner, title)
 
     monkeypatch.setattr(recipes, "unique_slug", stale_first)
     response = client.post("/recipes", json=recipe_body())
@@ -158,7 +143,7 @@ def test_create_recipe_gives_up_after_repeated_slug_conflicts(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client.post("/recipes", json=recipe_body())
-    monkeypatch.setattr(recipes, "unique_slug", lambda _session, _title: "dumplings")
+    monkeypatch.setattr(recipes, "unique_slug", lambda _session, _owner, _title: "dumplings")
 
     assert client.post("/recipes", json=recipe_body()).status_code == 409
     assert len(client.get("/recipes").json()) == 1
@@ -215,8 +200,37 @@ def test_list_recipes_in_requested_locale(client: TestClient) -> None:
             "prep_minutes": 20,
             "cook_minutes": 40,
             "created_at": items[0]["created_at"],
+            "cover": None,
         }
     ]
+
+
+def test_list_recipes_has_the_first_image_as_cover(
+    client: TestClient, db: sessionmaker[Session]
+) -> None:
+    client.post("/recipes", json=recipe_body())
+    with db() as session, session.begin():
+        recipe = session.scalars(select(Recipe)).one()
+        recipe.images = [
+            Image(position=1, storage_key="r/2.png", content_type="image/png"),
+            Image(
+                position=0,
+                storage_key="r/1.jpg",
+                content_type="image/jpeg",
+                width=800,
+                height=600,
+            ),
+        ]
+
+    cover = client.get("/recipes").json()[0]["cover"]
+
+    assert cover == {
+        "id": cover["id"],
+        "url": "https://media.test/r/1.jpg",
+        "content_type": "image/jpeg",
+        "width": 800,
+        "height": 600,
+    }
 
 
 def test_list_recipes_falls_back_to_english_then_any(client: TestClient) -> None:
@@ -288,10 +302,10 @@ def test_slug_without_english_follows_list_fallback_order(client: TestClient) ->
 
 
 def test_list_skips_recipes_without_translations(
-    client: TestClient, db: sessionmaker[Session]
+    client: TestClient, db: sessionmaker[Session], user_id: uuid.UUID
 ) -> None:
     with db() as session, session.begin():
-        session.add(Recipe(slug="empty"))
+        session.add(Recipe(slug="empty", owner_id=user_id))
     client.post("/recipes", json=recipe_body())
 
     response = client.get("/recipes", params={"limit": 1})
@@ -382,10 +396,10 @@ def test_get_recipe_unknown_slug_is_404(client: TestClient) -> None:
 
 
 def test_get_recipe_without_translations_is_404(
-    client: TestClient, db: sessionmaker[Session]
+    client: TestClient, db: sessionmaker[Session], user_id: uuid.UUID
 ) -> None:
     with db() as session, session.begin():
-        session.add(Recipe(slug="empty"))
+        session.add(Recipe(slug="empty", owner_id=user_id))
 
     assert client.get("/recipes/empty").status_code == 404
 
@@ -574,3 +588,134 @@ def test_openapi_describes_media_routes(client: TestClient) -> None:
     for kind in ("images", "videos"):
         assert "post" in paths[f"/recipes/{{slug}}/{kind}"]
         assert "post" in paths[f"/recipes/{{slug}}/{kind}/uploads"]
+
+
+# Accounts: every recipe route needs a signed-in user and sees only that user's recipes.
+
+ROUTES = [
+    ("get", "/recipes", None),
+    ("post", "/recipes", recipe_body()),
+    ("get", "/recipes/dumplings", None),
+    ("post", "/recipes/dumplings/images/uploads", {"content_type": "image/png", "size_bytes": 1}),
+    ("post", "/recipes/dumplings/images", {"storage_key": "k"}),
+    ("post", "/recipes/dumplings/videos/uploads", {"content_type": "video/mp4", "size_bytes": 1}),
+    ("post", "/recipes/dumplings/videos", {"storage_key": "k"}),
+    ("put", "/recipes/dumplings/ingredients", {"locale": "en", "ingredients": []}),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "body"), ROUTES)
+def test_recipe_routes_require_sign_in(
+    client: TestClient, anon: TestClient, method: str, path: str, body: Any
+) -> None:
+    client.post("/recipes", json=recipe_body())
+    response = anon.request(method, path, json=body)
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_users_see_only_their_own_recipes(client: TestClient, stranger: TestClient) -> None:
+    client.post("/recipes", json=recipe_body())
+
+    assert stranger.get("/recipes").json() == []
+    assert stranger.get("/recipes/dumplings").status_code == 404
+    assert [r["slug"] for r in client.get("/recipes").json()] == ["dumplings"]
+
+
+@pytest.mark.parametrize("kind", ["images", "videos"])
+def test_media_routes_404_for_another_users_recipe(
+    client: TestClient, stranger: TestClient, storage: FakeStorage, kind: str
+) -> None:
+    client.post("/recipes", json=recipe_body())
+    key = upload(client, storage, kind, "image/png" if kind == "images" else "video/mp4")
+    start = {"content_type": storage.objects[key].content_type, "size_bytes": 1}
+
+    assert stranger.post(f"/recipes/dumplings/{kind}/uploads", json=start).status_code == 404
+    assert stranger.post(f"/recipes/dumplings/{kind}", json={"storage_key": key}).status_code == 404
+
+
+def test_slugs_are_unique_per_user(client: TestClient, stranger: TestClient) -> None:
+    assert client.post("/recipes", json=recipe_body()).json()["slug"] == "dumplings"
+    assert stranger.post("/recipes", json=recipe_body()).json()["slug"] == "dumplings"
+
+
+def test_openapi_marks_recipe_routes_as_secured(client: TestClient) -> None:
+    paths = client.get("/openapi.json").json()["paths"]
+    assert paths["/recipes"]["get"]["security"]
+    assert paths["/recipes/{slug}/images"]["post"]["security"]
+
+
+def test_replace_ingredients_in_one_locale(client: TestClient) -> None:
+    client.post("/recipes", json=recipe_body())
+
+    response = client.put(
+        "/recipes/dumplings/ingredients",
+        json={"locale": "en", "ingredients": [" 500 g flour ", "2 tbsp ground flaxseed"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["locale"] == "en"
+    assert response.json()["ingredients"] == ["500 g flour", "2 tbsp ground flaxseed"]
+    saved = client.get("/recipes/dumplings").json()
+    assert saved["ingredients"] == ["500 g flour", "2 tbsp ground flaxseed"]
+    assert saved["steps"] == ["Mix", "Boil"]
+    assert client.get("/recipes/dumplings", params={"locale": "pl"}).json()["ingredients"] == []
+
+
+def test_replace_ingredients_can_empty_the_list(client: TestClient) -> None:
+    client.post("/recipes", json=recipe_body())
+
+    response = client.put(
+        "/recipes/dumplings/ingredients", json={"locale": "en", "ingredients": []}
+    )
+
+    assert response.status_code == 200
+    assert client.get("/recipes/dumplings").json()["ingredients"] == []
+
+
+def test_replace_ingredients_needs_an_existing_translation(client: TestClient) -> None:
+    client.post("/recipes", json=recipe_body())
+
+    response = client.put(
+        "/recipes/dumplings/ingredients", json={"locale": "ru", "ingredients": ["мука"]}
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"ingredients": ["flour"]},
+        {"locale": "en"},
+        {"locale": "en", "ingredients": ["  "]},
+        {"locale": "en", "ingredients": ["flour"], "steps": ["Mix"]},
+    ],
+    ids=["no-locale", "no-ingredients", "blank-ingredient", "unknown-field"],
+)
+def test_replace_ingredients_rejects_invalid_input(
+    client: TestClient, body: dict[str, Any]
+) -> None:
+    client.post("/recipes", json=recipe_body())
+
+    assert client.put("/recipes/dumplings/ingredients", json=body).status_code == 422
+
+
+def test_replace_ingredients_is_private(
+    client: TestClient, stranger: TestClient, anon: TestClient
+) -> None:
+    client.post("/recipes", json=recipe_body())
+    body = {"locale": "en", "ingredients": ["sand"]}
+
+    assert anon.put("/recipes/dumplings/ingredients", json=body).status_code == 401
+    assert stranger.put("/recipes/dumplings/ingredients", json=body).status_code == 404
+    assert client.get("/recipes/dumplings").json()["ingredients"] == ["500 g flour", "2 eggs"]
+
+
+def test_openapi_describes_replace_ingredients(client: TestClient) -> None:
+    route = client.get("/openapi.json").json()["paths"]["/recipes/{slug}/ingredients"]["put"]
+
+    assert route["security"]
+    assert route["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/RecipeDetail"
+    )

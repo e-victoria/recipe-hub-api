@@ -31,15 +31,51 @@ class Locale(enum.StrEnum):
     pl = "pl"
 
 
+class User(Base):
+    """One person's account. Family members are profiles inside it, not logins."""
+
+    __tablename__ = "user"
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # Stored trimmed and lowercased, so lookups are exact matches.
+    email: Mapped[str] = mapped_column(String(254), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    sessions: Mapped[list["UserSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class UserSession(Base):
+    """A signed-in device. Only a hash of its token is stored, so a database leak can't sign in."""
+
+    __tablename__ = "user_session"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
 class Recipe(Base):
     """Language-neutral recipe data. Text lives in RecipeTranslation."""
 
     __tablename__ = "recipe"
+    # Slugs only need to be unique per owner: each user's URLs are their own.
+    __table_args__ = (UniqueConstraint("owner_id", "slug"),)
     # Fetch server-set timestamps after INSERT and UPDATE, so they are readable after commit.
     __mapper_args__ = {"eager_defaults": True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    slug: Mapped[str] = mapped_column(String(200), unique=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"))
+    slug: Mapped[str] = mapped_column(String(200))
     servings: Mapped[int | None] = mapped_column(Integer)
     prep_minutes: Mapped[int | None] = mapped_column(Integer)
     cook_minutes: Mapped[int | None] = mapped_column(Integer)
@@ -48,6 +84,7 @@ class Recipe(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    owner: Mapped[User] = relationship()
     translations: Mapped[list["RecipeTranslation"]] = relationship(
         back_populates="recipe", cascade="all, delete-orphan"
     )
