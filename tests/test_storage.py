@@ -10,9 +10,11 @@ import app.storage
 from app.storage import (
     PRESIGN_SECONDS,
     ImageStorage,
+    StoredObject,
     UnsupportedImageType,
     image_key,
     make_client,
+    video_key,
 )
 
 BUCKET = "test-images"
@@ -57,6 +59,22 @@ def test_image_key_is_namespaced_by_recipe() -> None:
 def test_image_key_rejects_other_types() -> None:
     with pytest.raises(UnsupportedImageType):
         image_key(uuid.uuid4(), "image/gif")
+
+
+def test_video_key_is_namespaced_by_recipe() -> None:
+    recipe_id = uuid.uuid4()
+    key = video_key(recipe_id, "video/webm")
+    assert key.startswith(f"recipes/{recipe_id}/")
+    assert key.endswith(".webm")
+
+
+def test_head_reports_what_is_stored(storage: ImageStorage) -> None:
+    storage.put("recipes/x/1.png", b"png-bytes", "image/png")
+    assert storage.head("recipes/x/1.png") == StoredObject(9, "image/png")
+
+
+def test_head_of_a_missing_object_is_none(storage: ImageStorage) -> None:
+    assert storage.head("recipes/x/missing.png") is None
 
 
 def test_put_and_delete(storage: ImageStorage) -> None:

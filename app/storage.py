@@ -1,9 +1,11 @@
 import functools
 import uuid
+from dataclasses import dataclass
 
 import boto3
 from botocore.client import BaseClient
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from app.settings import settings
 
@@ -13,11 +15,24 @@ IMAGE_CONTENT_TYPES = {
     "image/png": "png",
     "image/webp": "webp",
 }
+# Only types browsers play natively: .mov, for one, doesn't work in Chrome or Firefox.
+VIDEO_CONTENT_TYPES = {
+    "video/mp4": "mp4",
+    "video/webm": "webm",
+}
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_VIDEO_BYTES = 200 * 1024 * 1024
 PRESIGN_SECONDS = 15 * 60
 
 
 class UnsupportedImageType(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class StoredObject:
+    size_bytes: int
+    content_type: str
 
 
 def image_key(recipe_id: uuid.UUID, content_type: str) -> str:
@@ -26,6 +41,10 @@ def image_key(recipe_id: uuid.UUID, content_type: str) -> str:
     except KeyError:
         raise UnsupportedImageType(content_type) from None
     return f"recipes/{recipe_id}/{uuid.uuid4()}.{ext}"
+
+
+def video_key(recipe_id: uuid.UUID, content_type: str) -> str:
+    return f"recipes/{recipe_id}/{uuid.uuid4()}.{VIDEO_CONTENT_TYPES[content_type]}"
 
 
 def make_client() -> BaseClient:
@@ -49,6 +68,16 @@ class ImageStorage:
 
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def head(self, key: str) -> StoredObject | None:
+        """What is actually stored at `key`, or None if nothing is."""
+        try:
+            response = self.client.head_object(Bucket=self.bucket, Key=key)
+        except ClientError as error:
+            if error.response["Error"]["Code"] in ("404", "NoSuchKey"):
+                return None
+            raise
+        return StoredObject(response["ContentLength"], response["ContentType"])
 
     def upload_url(self, key: str, content_type: str) -> str:
         """Presigned PUT so clients upload straight to the bucket."""

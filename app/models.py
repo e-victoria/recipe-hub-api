@@ -54,6 +54,9 @@ class Recipe(Base):
     images: Mapped[list["Image"]] = relationship(
         back_populates="recipe", cascade="all, delete-orphan", order_by="Image.position"
     )
+    videos: Mapped[list["Video"]] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan", order_by="Video.position"
+    )
 
 
 class RecipeTranslation(Base):
@@ -92,3 +95,20 @@ class Image(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     recipe: Mapped[Recipe] = relationship(back_populates="images")
+
+
+class Video(Base):
+    """Metadata for an object in S3, like Image."""
+
+    __tablename__ = "video"
+    __table_args__ = (Index("ix_video_recipe_id_position", "recipe_id", "position"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    recipe_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("recipe.id", ondelete="CASCADE"))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    storage_key: Mapped[str] = mapped_column(String(500), unique=True)
+    content_type: Mapped[str] = mapped_column(String(100))
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    recipe: Mapped[Recipe] = relationship(back_populates="videos")

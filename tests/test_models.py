@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 import app.settings
 from app.db import Base
-from app.models import Image, Locale, Recipe, RecipeTranslation
+from app.models import Image, Locale, Recipe, RecipeTranslation, Video
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -54,6 +54,10 @@ def make_recipe() -> Recipe:
             Image(position=1, storage_key="recipes/a/2.jpg", content_type="image/jpeg"),
             Image(position=0, storage_key="recipes/a/1.jpg", content_type="image/jpeg"),
         ],
+        videos=[
+            Video(position=1, storage_key="recipes/a/2.mp4", content_type="video/mp4"),
+            Video(position=0, storage_key="recipes/a/1.mp4", content_type="video/mp4"),
+        ],
     )
 
 
@@ -68,6 +72,7 @@ def test_recipe_round_trip(session: Session) -> None:
     pl = next(t for t in recipe.translations if t.locale is Locale.pl)
     assert pl.ingredients == [] and pl.steps == []
     assert [i.storage_key for i in recipe.images] == ["recipes/a/1.jpg", "recipes/a/2.jpg"]
+    assert [v.storage_key for v in recipe.videos] == ["recipes/a/1.mp4", "recipes/a/2.mp4"]
     assert recipe.created_at is not None
 
 
@@ -123,6 +128,7 @@ def test_deleting_recipe_deletes_children(session: Session) -> None:
     session.commit()
     assert session.scalars(select(RecipeTranslation)).all() == []
     assert session.scalars(select(Image)).all() == []
+    assert session.scalars(select(Video)).all() == []
 
 
 def test_database_cascades_without_the_orm(session: Session) -> None:
@@ -132,6 +138,7 @@ def test_database_cascades_without_the_orm(session: Session) -> None:
     session.commit()
     assert session.scalars(select(RecipeTranslation)).all() == []
     assert session.scalars(select(Image)).all() == []
+    assert session.scalars(select(Video)).all() == []
 
 
 @pytest.fixture

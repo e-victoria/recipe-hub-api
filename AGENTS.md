@@ -15,7 +15,8 @@ Recipe Hub API: FastAPI on Python 3.13. Its OpenAPI spec (`/openapi.json`) is th
 
 - Postgres via SQLAlchemy 2 (`app/db.py`, `app/models.py`), migrations in `migrations/` (Alembic).
 - Recipe text lives in `recipe_translation`, one row per locale (`en`, `ru`, `pl`).
-- Image bytes live in S3 (RustFS locally, AWS S3 in production) via `app/storage.py`; the `image` table stores only the key and metadata.
+- Image and video bytes live in S3 (RustFS locally, AWS S3 in production) via `app/storage.py`; the `image` and `video` tables store only the key and metadata.
+- Clients upload media straight to the bucket: `POST /recipes/{slug}/images/uploads` (or `videos`) returns a presigned PUT URL, then `POST /recipes/{slug}/images` confirms it. Browsers need a CORS rule on the bucket allowing `PUT` with `content-type` from the web origin: `docker-compose.yml` sets it locally, production must set it too.
 - Tests use in-memory SQLite and moto, so they need no running services.
 
 ## AI config

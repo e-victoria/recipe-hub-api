@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -13,10 +13,15 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from app.models import Locale
+from app.storage import MAX_IMAGE_BYTES, MAX_VIDEO_BYTES
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Minutes = Annotated[int, Field(ge=0)]
+Pixels = Annotated[int, Field(ge=1)]
+# Keep in step with IMAGE_CONTENT_TYPES and VIDEO_CONTENT_TYPES in app/storage.py.
+ImageContentType = Literal["image/jpeg", "image/png", "image/webp"]
+VideoContentType = Literal["video/mp4", "video/webm"]
 
 
 def _blank_to_none(value: object) -> object:
@@ -93,3 +98,76 @@ class RecipeSummary(BaseModel):
     prep_minutes: int | None
     cook_minutes: int | None
     created_at: datetime
+
+
+class RecipeImage(BaseModel):
+    """`url` is presigned and expires; fetch the recipe again for a fresh one."""
+
+    id: uuid.UUID
+    url: str
+    content_type: str
+    width: int | None
+    height: int | None
+
+
+class RecipeVideo(BaseModel):
+    """`url` is presigned and expires; fetch the recipe again for a fresh one."""
+
+    id: uuid.UUID
+    url: str
+    content_type: str
+
+
+class ImageUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content_type: ImageContentType
+    size_bytes: Annotated[int, Field(ge=1, le=MAX_IMAGE_BYTES)]
+
+
+class VideoUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content_type: VideoContentType
+    size_bytes: Annotated[int, Field(ge=1, le=MAX_VIDEO_BYTES)]
+
+
+class MediaUpload(BaseModel):
+    """PUT the file to `upload_url` with the same Content-Type, then confirm `storage_key`."""
+
+    storage_key: str
+    upload_url: str
+
+
+class ImageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    storage_key: str
+    width: Pixels | None = None
+    height: Pixels | None = None
+
+
+class VideoCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    storage_key: str
+
+
+class RecipeDetail(BaseModel):
+    """A full recipe in one locale. `locale` says which one the text is in."""
+
+    id: uuid.UUID
+    slug: str
+    locale: Locale
+    title: str
+    description: str | None
+    ingredients: list[str]
+    steps: list[str]
+    servings: int | None
+    prep_minutes: int | None
+    cook_minutes: int | None
+    created_at: datetime
+    updated_at: datetime
+    # In display order; the first image is the cover.
+    images: list[RecipeImage]
+    videos: list[RecipeVideo]
