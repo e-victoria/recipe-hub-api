@@ -5,15 +5,25 @@ Recipe Hub API: FastAPI on Python 3.13. Its OpenAPI spec (`/openapi.json`) is th
 ## Commands
 
 - Setup: `python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'`
-- Run: `.venv/bin/uvicorn app.main:app --reload --port 8000` (docs at http://localhost:8000/docs)
+- Local services: `docker compose up -d` (Postgres on 5432, RustFS (S3) on 9000, console on 9001), then `cp .env.example .env`
+- Migrate: `.venv/bin/alembic upgrade head`; new migration: `.venv/bin/alembic revision --autogenerate -m "..."` (review the generated file before committing)
+- Run: `.venv/bin/uvicorn app.main:app --reload --port 8000 --env-file .env` (docs at http://localhost:8000/docs)
 - Tests: `.venv/bin/pytest` (files in `tests/`)
 - Lint and format: `.venv/bin/ruff check . && .venv/bin/ruff format --check .`
+
+## Data
+
+- Postgres via SQLAlchemy 2 (`app/db.py`, `app/models.py`), migrations in `migrations/` (Alembic).
+- Recipe text lives in `recipe_translation`, one row per locale (`en`, `ru`, `pl`).
+- Image and video bytes live in S3 (RustFS locally, AWS S3 in production) via `app/storage.py`; the `image` and `video` tables store only the key and metadata.
+- Clients upload media straight to the bucket: `POST /recipes/{slug}/images/uploads` (or `videos`) returns a presigned PUT URL, then `POST /recipes/{slug}/images` confirms it. Browsers need a CORS rule on the bucket allowing `PUT` with `content-type` from the web origin: `docker-compose.yml` sets it locally, production must set it too.
+- Tests use in-memory SQLite and moto, so they need no running services.
 
 ## AI config
 
 Shared rules, skills and personas come from `recipe-hub-ai` (version pinned in `ai.json`). Don't edit the generated block below or `.claude/skills` / `.claude/agents` by hand; change them in `recipe-hub-ai` and run `python3 ../recipe-hub-ai/sync.py .`.
 
-<!-- recipe-hub-ai:begin v0.1.0 -- generated, edit in recipe-hub-ai and run sync -->
+<!-- recipe-hub-ai:begin v0.3.0 -- generated, edit in recipe-hub-ai and run sync -->
 
 ## Recipe Hub — shared rules
 
@@ -22,6 +32,17 @@ Recipe Hub is a trilingual (EN/RU/PL) recipe web app, with a native Swift iOS ap
 - `recipe-hub` — Nuxt (Vue) web app: server-rendered, PWA.
 - `recipe-hub-api` — FastAPI backend. Its OpenAPI spec is the contract for every client.
 - `recipe-hub-ai` — shared skills, rules and personas for coding agents. This block was generated from it.
+
+### Product
+
+Recipe Hub is a personal hub of saved recipes, with nutrition data and family meal planning.
+
+- **Adding recipes**, three ways: fill in the "New recipe" form; paste a link or recipe text copied from elsewhere, which AI parses into the form; or ask the AI assistant to come up with a recipe.
+- **Managing recipes**: edit, delete, change portions, add comments. Edits are made by hand or with AI assistance.
+- **Nutrition**: every recipe has nutritional values (calories, fat, protein, vitamins, minerals, etc.). If a recipe lacks them, AI estimates them from the ingredient list.
+- **Labels**: built-in labels (e.g. "kids friendly", "thermomix") plus the user's own custom labels.
+- **Family members**: created and edited, each with preferences, calorie needs and health conditions.
+- **Meal planning**: a weekly menu in calendar and list views, with meals planned per family member.
 
 ### Working agreement
 

@@ -1,6 +1,8 @@
 ---
 name: test-author
 description: Writes tests from a specification or bug report, without implementing the feature. Use to write failing tests before implementation.
+model: claude-sonnet-5-5
+effort: medium
 ---
 
 You write tests only. You never change production code.
