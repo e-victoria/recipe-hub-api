@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app import recipes
+from app import auth, recipes
 from app.db import get_engine
 from app.settings import settings
 
@@ -25,6 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(recipes.router)
 
 

@@ -19,6 +19,14 @@ Recipe Hub API: FastAPI on Python 3.13. Its OpenAPI spec (`/openapi.json`) is th
 - Clients upload media straight to the bucket: `POST /recipes/{slug}/images/uploads` (or `videos`) returns a presigned PUT URL, then `POST /recipes/{slug}/images` confirms it. Browsers need a CORS rule on the bucket allowing `PUT` with `content-type` from the web origin: `docker-compose.yml` sets it locally, production must set it too.
 - Tests use in-memory SQLite and moto, so they need no running services.
 
+## Accounts
+
+- One account per person (`user`); family members will be profiles inside it, not logins. Every recipe has an `owner_id`, and slugs are unique per owner.
+- `/auth/register` and `/auth/login` return a session token; clients send `Authorization: Bearer <token>`. The database stores only SHA-256 hashes of tokens and Argon2id hashes of passwords (`pwdlib`). Sessions last `SESSION_DAYS` (30).
+- Every endpoint that touches user data takes `user: CurrentUser` from `app/auth.py` and filters by it. Another user's data is a 404, never a 403.
+- Login and registration rate limits live in process memory (`app/ratelimit.py`): fine for one worker, but move them to a shared store before scaling out. Behind a proxy, run uvicorn with `--proxy-headers` so limits see the client address.
+- Upgrading a database that already has recipes: run `alembic upgrade 411be2343bc7`, start the API and register, then `alembic upgrade head` gives existing recipes to the earliest user.
+
 ## AI config
 
 Shared rules, skills and personas come from `recipe-hub-ai` (version pinned in `ai.json`). Don't edit the generated block below or `.claude/skills` / `.claude/agents` by hand; change them in `recipe-hub-ai` and run `python3 ../recipe-hub-ai/sync.py .`.

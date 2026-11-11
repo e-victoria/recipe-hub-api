@@ -171,3 +171,47 @@ class RecipeDetail(BaseModel):
     # In display order; the first image is the cover.
     images: list[RecipeImage]
     videos: list[RecipeVideo]
+
+
+# Accounts
+
+# Deliberately loose: the only real check is sending mail to it, which comes with verification.
+Email = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, to_lower=True, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+    ),
+]
+# Not stripped: spaces are part of a password. The cap keeps hashing cheap to refuse.
+NewPassword = Annotated[str, StringConstraints(min_length=8, max_length=128)]
+Password = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: Email
+    password: NewPassword
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: Email
+    password: Password
+
+
+class User(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    created_at: datetime
+
+
+class AuthSession(BaseModel):
+    """Send `token` as `Authorization: Bearer <token>` until `expires_at`."""
+
+    token: str
+    expires_at: datetime
+    user: User

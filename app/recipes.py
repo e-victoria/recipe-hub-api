@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app import models, schemas
+from app.auth import CurrentUser
 from app.db import get_session
 from app.slugs import slugify
 from app.storage import (
@@ -46,12 +47,13 @@ def pick_translation[T: Localized](translations: Iterable[T], locale: models.Loc
     raise ValueError("no translations to pick from")
 
 
-def unique_slug(session: Session, title: str) -> str:
+def unique_slug(session: Session, owner: models.User, title: str) -> str:
     base = slugify(title)
     taken = RESERVED_SLUGS | set(
         session.scalars(
             select(models.Recipe.slug).where(
-                or_(models.Recipe.slug == base, models.Recipe.slug.startswith(f"{base}-"))
+                models.Recipe.owner_id == owner.id,
+                or_(models.Recipe.slug == base, models.Recipe.slug.startswith(f"{base}-")),
             )
         )
     )
@@ -61,7 +63,8 @@ def unique_slug(session: Session, title: str) -> str:
     return slug
 
 
-def find_recipe(session: Session, slug: str) -> models.Recipe:
+def find_recipe(session: Session, owner: models.User, slug: str) -> models.Recipe:
+    """The owner's recipe. Someone else's is a 404, so clients can't probe for slugs."""
     recipe = session.scalars(
         select(models.Recipe)
         .options(
@@ -69,7 +72,7 @@ def find_recipe(session: Session, slug: str) -> models.Recipe:
             selectinload(models.Recipe.images),
             selectinload(models.Recipe.videos),
         )
-        .where(models.Recipe.slug == slug)
+        .where(models.Recipe.owner_id == owner.id, models.Recipe.slug == slug)
     ).one_or_none()
     # A recipe with no text can't be shown, so it doesn't exist as far as clients can tell.
     if recipe is None or not recipe.translations:
@@ -129,6 +132,7 @@ def commit_media(session: Session) -> None:
 @router.get("", response_model=list[schemas.RecipeSummary], status_code=status.HTTP_200_OK)
 def list_recipes(
     session: SessionDep,
+    user: CurrentUser,
     locale: models.Locale = models.Locale.en,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -138,7 +142,7 @@ def list_recipes(
         select(models.Recipe)
         .options(selectinload(models.Recipe.translations))
         # A recipe with no text can't be listed; skip it in SQL so paging stays exact.
-        .where(models.Recipe.translations.any())
+        .where(models.Recipe.owner_id == user.id, models.Recipe.translations.any())
         .order_by(models.Recipe.created_at.desc(), models.Recipe.id)
         .limit(limit)
         .offset(offset)
@@ -167,10 +171,11 @@ def get_recipe(
     slug: str,
     session: SessionDep,
     storage: StorageDep,
+    user: CurrentUser,
     locale: models.Locale = models.Locale.en,
 ) -> schemas.RecipeDetail:
     """One recipe with its media, with text in `locale` where a translation exists."""
-    recipe = find_recipe(session, slug)
+    recipe = find_recipe(session, user, slug)
     text = pick_translation(recipe.translations, locale)
     return schemas.RecipeDetail(
         id=recipe.id,
@@ -191,12 +196,15 @@ def get_recipe(
 
 
 @router.post("", response_model=schemas.Recipe, status_code=status.HTTP_201_CREATED)
-def create_recipe(body: schemas.RecipeCreate, session: SessionDep) -> schemas.Recipe:
+def create_recipe(
+    body: schemas.RecipeCreate, session: SessionDep, user: CurrentUser
+) -> schemas.Recipe:
     # Same rule as the English list, so the slug matches the title shown there.
     slug_source = pick_translation(body.translations, models.Locale.en)
     for _ in range(SLUG_ATTEMPTS):
         recipe = models.Recipe(
-            slug=unique_slug(session, slug_source.title),
+            owner_id=user.id,
+            slug=unique_slug(session, user, slug_source.title),
             servings=body.servings,
             prep_minutes=body.prep_minutes,
             cook_minutes=body.cook_minutes,
@@ -218,10 +226,14 @@ def create_recipe(body: schemas.RecipeCreate, session: SessionDep) -> schemas.Re
     status_code=status.HTTP_201_CREATED,
 )
 def start_image_upload(
-    slug: str, body: schemas.ImageUploadRequest, session: SessionDep, storage: StorageDep
+    slug: str,
+    body: schemas.ImageUploadRequest,
+    session: SessionDep,
+    storage: StorageDep,
+    user: CurrentUser,
 ) -> schemas.MediaUpload:
     """A URL to upload an image to. Add it to the recipe afterwards with POST /images."""
-    key = image_key(find_recipe(session, slug).id, body.content_type)
+    key = image_key(find_recipe(session, user, slug).id, body.content_type)
     return schemas.MediaUpload(
         storage_key=key, upload_url=storage.upload_url(key, body.content_type)
     )
@@ -231,10 +243,14 @@ def start_image_upload(
     "/{slug}/images", response_model=schemas.RecipeImage, status_code=status.HTTP_201_CREATED
 )
 def add_image(
-    slug: str, body: schemas.ImageCreate, session: SessionDep, storage: StorageDep
+    slug: str,
+    body: schemas.ImageCreate,
+    session: SessionDep,
+    storage: StorageDep,
+    user: CurrentUser,
 ) -> schemas.RecipeImage:
     """Add an uploaded image after the recipe's other images."""
-    recipe = find_recipe(session, slug)
+    recipe = find_recipe(session, user, slug)
     stored = uploaded_object(
         storage, recipe, body.storage_key, IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES
     )
@@ -257,10 +273,14 @@ def add_image(
     status_code=status.HTTP_201_CREATED,
 )
 def start_video_upload(
-    slug: str, body: schemas.VideoUploadRequest, session: SessionDep, storage: StorageDep
+    slug: str,
+    body: schemas.VideoUploadRequest,
+    session: SessionDep,
+    storage: StorageDep,
+    user: CurrentUser,
 ) -> schemas.MediaUpload:
     """A URL to upload a video to. Add it to the recipe afterwards with POST /videos."""
-    key = video_key(find_recipe(session, slug).id, body.content_type)
+    key = video_key(find_recipe(session, user, slug).id, body.content_type)
     return schemas.MediaUpload(
         storage_key=key, upload_url=storage.upload_url(key, body.content_type)
     )
@@ -270,10 +290,14 @@ def start_video_upload(
     "/{slug}/videos", response_model=schemas.RecipeVideo, status_code=status.HTTP_201_CREATED
 )
 def add_video(
-    slug: str, body: schemas.VideoCreate, session: SessionDep, storage: StorageDep
+    slug: str,
+    body: schemas.VideoCreate,
+    session: SessionDep,
+    storage: StorageDep,
+    user: CurrentUser,
 ) -> schemas.RecipeVideo:
     """Add an uploaded video after the recipe's other videos."""
-    recipe = find_recipe(session, slug)
+    recipe = find_recipe(session, user, slug)
     stored = uploaded_object(
         storage, recipe, body.storage_key, VIDEO_CONTENT_TYPES, MAX_VIDEO_BYTES
     )
